@@ -333,7 +333,7 @@ class EEGDataset(Dataset):
         self.nfft = nfft
         self.hop_length = hop_length
         self.spec_size = spec_size
-        self.resize = Resize(spec_size)
+        self.resize = Resize(spec_size, antialias=None)
 
     def __len__(self):
         return len(self.input_paths)
