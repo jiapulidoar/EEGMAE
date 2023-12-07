@@ -57,7 +57,7 @@ class MaskedAutoencoderViT(nn.Module):
         self.encoder_depth = depth
         self.contextual_depth = contextual_depth
         self.blocks = nn.ModuleList([
-            Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
+            Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
 
@@ -110,7 +110,7 @@ class MaskedAutoencoderViT(nn.Module):
         else:
             # Transfomer
             self.decoder_blocks = nn.ModuleList([
-                Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
+                Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer)
                 for i in range(decoder_depth)])
 
         self.decoder_norm = norm_layer(decoder_embed_dim)
@@ -122,6 +122,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         self.patch_size=patch_size
         self.stride=stride
+        self.in_chans=in_chans
 
         # audio exps
         self.alpha = alpha
@@ -198,9 +199,9 @@ class MaskedAutoencoderViT(nn.Module):
                 h = imgs.shape[2] // p
                 w = imgs.shape[3] // p
                 #h,w = self.patch_embed.patch_hw
-                x = imgs.reshape(shape=(imgs.shape[0], 1, h, p, w, p))
+                x = imgs.reshape(shape=(imgs.shape[0], self.in_chans, h, p, w, p)) # channels 128
                 x = torch.einsum('nchpwq->nhwpqc', x)
-                x = x.reshape(shape=(imgs.shape[0], h * w, p**2 * 1))
+                x = x.reshape(shape=(imgs.shape[0], h * w, p**2 * self.in_chans))
         else:
             h = w = imgs.shape[2] // p
             x = imgs.reshape(shape=(imgs.shape[0], 3, h, p, w, p))
@@ -215,8 +216,8 @@ class MaskedAutoencoderViT(nn.Module):
         specs: (N, 1, H, W)
         """
         p = self.patch_embed.patch_size[0]    
-        h = 1024//p
-        w = 128//p
+        h = 64//p
+        w = 64//p
         x = x.reshape(shape=(x.shape[0], h, w, p, p, 1))
         x = torch.einsum('nhwpqc->nchpwq', x)
         specs = x.reshape(shape=(x.shape[0], 1, h * p, w * p))
@@ -426,8 +427,8 @@ class MaskedAutoencoderViT(nn.Module):
 
 def mae_vit_small_patch16_dec512d8b(**kwargs):
     model = MaskedAutoencoderViT(
-        patch_size=16, embed_dim=384, depth=12, num_heads=6,
-        decoder_embed_dim=512, decoder_num_heads=16,
+        patch_size=6, embed_dim=384, depth=12, num_heads=6,
+        decoder_embed_dim=512, decoder_num_heads=6,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
@@ -453,8 +454,19 @@ def mae_vit_huge_patch14_dec512d8b(**kwargs):
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
+
+def maeeg_vit_base_patch4_dec512d8b(**kwargs):
+    model = MaskedAutoencoderViT(
+        patch_size=4, embed_dim=768, depth=6, num_heads=16,
+        decoder_embed_dim=512, decoder_num_heads=16,
+        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+    return model
+
 # set recommended archs
 mae_vit_base_patch16 = mae_vit_base_patch16_dec512d8b  # decoder: 512 dim, 8 blocks
 mae_vit_large_patch16 = mae_vit_large_patch16_dec512d8b  # decoder: 512 dim, 8 blocks
 mae_vit_huge_patch14 = mae_vit_huge_patch14_dec512d8b  # decoder: 512 dim, 8 blocks
 mae_vit_small_patch16 = mae_vit_small_patch16_dec512d8b # decoder: 512 dim, 8 blocks
+
+
+maeeg_vit_base_patch16 = maeeg_vit_base_patch4_dec512d8b # decoder: 512 dim, 8 blocks
