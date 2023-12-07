@@ -15,8 +15,14 @@ import torch.nn.functional
 from torch.utils.data import Dataset, Sampler
 from torch.utils.data import DistributedSampler, WeightedRandomSampler
 import torch.distributed as dist
+import torchaudio.transforms as T
+from torchvision.transforms import Resize
 import random
 import math
+from typing import Callable, Optional, Tuple, Union
+from scipy.interpolate import interp1d
+from pathlib import Path
+
 
 class DistributedSamplerWrapper(DistributedSampler):
     def __init__(
@@ -308,3 +314,66 @@ class AudiosetDataset(Dataset):
         return len(self.data)
 
 
+def file_ext(name: Union[str, Path]) -> str:
+    return str(name).split('.')[-1]
+
+def is_npy_ext(fname: Union[str, Path]) -> bool:
+    ext = file_ext(fname).lower()
+    return f'{ext}' == 'npy'# type: ignore
+
+class EEGDataset(Dataset):
+    def __init__(self, path='../datasets/mne_data/', nfft = 128, hop_length=16, spec_size=(64,64)):
+        super(EEGDataset, self).__init__()
+
+        self.input_paths = [str(f) for f in sorted(Path(path).rglob('*')) if is_npy_ext(f) and os.path.isfile(f)]
+
+        assert len(self.input_paths) != 0, 'No data found'
+        self.data_len  = 512
+        self.data_chan = 128
+        self.nfft = nfft
+        self.hop_length = hop_length
+        self.spec_size = spec_size
+        self.resize = Resize(spec_size)
+
+    def __len__(self):
+        return len(self.input_paths)
+    
+    def __getitem__(self, index):
+        data_path = self.input_paths[index]
+
+        data = np.load(data_path, allow_pickle=True)
+
+        if data.shape[-1] > self.data_len:
+            idx = np.random.randint(0, int(data.shape[-1] - self.data_len)+1)
+            data = data[:, idx: idx+self.data_len]
+        else:
+            x = np.linspace(0, 1, data.shape[-1])
+            x2 = np.linspace(0, 1, self.data_len)
+            f = interp1d(x, data)
+            data = f(x2)
+        ret = np.zeros((self.data_chan, self.data_len))
+        if (self.data_chan > data.shape[-2]):
+            for i in range((self.data_chan//data.shape[-2])):
+
+                ret[i * data.shape[-2]: (i+1) * data.shape[-2], :] = data
+            if self.data_chan % data.shape[-2] != 0:
+
+                ret[ -(self.data_chan%data.shape[-2]):, :] = data[: (self.data_chan%data.shape[-2]), :]
+        elif(self.data_chan < data.shape[-2]):
+            idx2 = np.random.randint(0, int(data.shape[-2] - self.data_chan)+1)
+            ret = data[idx2: idx2+self.data_chan, :]
+        # print(ret.shape)
+        elif(self.data_chan == data.shape[-2]):
+            ret = data
+        ret = ret/10 # reduce an order
+        # torch.tensor()
+        ret = torch.from_numpy(ret).float()
+        spec = self._spectogram(ret)
+        return spec, ret, len(ret)
+    
+    def _spectogram(self, signal):
+        spec = torch.stft(signal, self.nfft, hop_length=self.hop_length, return_complex=True)
+        spec = torch.abs(spec)**2
+        spec_db = T.AmplitudeToDB(stype="power", top_db=80)(spec)
+        spec_db = self.resize(spec_db)
+        return spec_db
