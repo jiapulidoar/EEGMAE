@@ -24,7 +24,7 @@ import torchvision.datasets as datasets
 
 import timm
 
-assert timm.__version__ == "0.3.2"  # version check
+#assert timm.__version__ == "0.3.2"  # version check
 import timm.optim.optim_factory as optim_factory
 
 import util.misc as misc
@@ -35,6 +35,8 @@ import models_mae
 
 from engine_pretrain import train_one_epoch
 from dataset import AudiosetDataset
+from dataset import EEGDataset
+
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
@@ -45,7 +47,7 @@ def get_args_parser():
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
 
     # Model parameters
-    parser.add_argument('--model', default='mae_vit_base_patch16', type=str, metavar='MODEL',
+    parser.add_argument('--model', default='maeeg_vit_base_patch16', type=str, metavar='MODEL',
                         help='Name of model to train')
 
     parser.add_argument('--input_size', default=224, type=int,
@@ -74,8 +76,8 @@ def get_args_parser():
                         help='epochs to warmup LR')
 
     # Dataset parameters
-    parser.add_argument('--data_path', default='/datasets01/imagenet_full_size/061417/', type=str,
-                        help='dataset path')
+    # parser.add_argument('--data_path', default='/datasets01/imagenet_full_size/061417/', type=str,
+    #                     help='dataset path')
 
     parser.add_argument('--output_dir', default='./output_dir',
                         help='path where to save, empty for no saving')
@@ -102,6 +104,12 @@ def get_args_parser():
     parser.add_argument('--dist_on_itp', action='store_true')
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
+
+
+    # For eegset 
+    parser.add_argument("--data_path", type=str, default='/dataset/mne_data/', help="training data directory")
+    parser.add_argument("--nfft", type=int, default=128, help="n for stft")
+    parser.add_argument("--hop_length", type=int, default=16, help="hop_length for stft")
 
 
     # For audioset
@@ -162,32 +170,37 @@ def main(args):
 
     cudnn.benchmark = True
 
-    # simple augmentation
-    if not args.audio_exp:
-        transform_train = transforms.Compose([
-            transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-        dataset_train = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
-    else:
-        norm_stats = {'audioset':[-4.2677393, 4.5689974], 'esc50':[-6.6268077, 5.358466], 'speechcommands':[-6.845978, 5.5654526]}
-        target_length = {'audioset':1024, 'esc50':512, 'speechcommands':128}
-        multilabel_dataset = {'audioset': True, 'esc50': False, 'k400': False, 'speechcommands': True}
-        audio_conf = {'num_mel_bins': 128, 
-                      'target_length': target_length[args.dataset], 
-                      'freqm': args.freqm,
-                      'timem': args.timem,
-                      'mixup': args.mixup,
-                      'dataset': args.dataset,
-                      'mode':'train',
-                      'mean':norm_stats[args.dataset][0],
-                      'std':norm_stats[args.dataset][1],
-                      'multilabel':multilabel_dataset[args.dataset],
-                      'noise':False}
-        dataset_train = AudiosetDataset(args.data_train, label_csv=args.label_csv, audio_conf=audio_conf, roll_mag_aug=args.roll_mag_aug,
-                                        load_video=args.load_video)
+    # simple augmentation  IMAGE
+    # if not args.audio_exp:
+    #     transform_train = transforms.Compose([
+    #         transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
+    #         transforms.RandomHorizontalFlip(),
+    #         transforms.ToTensor(),
+    #         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+    #     dataset_train = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
+    # else:  AUDIO 
+    #     norm_stats = {'audioset':[-4.2677393, 4.5689974], 'esc50':[-6.6268077, 5.358466], 'speechcommands':[-6.845978, 5.5654526]}
+    #     target_length = {'audioset':1024, 'esc50':512, 'speechcommands':128}
+    #     multilabel_dataset = {'audioset': True, 'esc50': False, 'k400': False, 'speechcommands': True}
+    #     audio_conf = {'num_mel_bins': 128, 
+    #                   'target_length': target_length[args.dataset], 
+    #                   'freqm': args.freqm,
+    #                   'timem': args.timem,
+    #                   'mixup': args.mixup,
+    #                   'dataset': args.dataset,
+    #                   'mode':'train',
+    #                   'mean':norm_stats[args.dataset][0],
+    #                   'std':norm_stats[args.dataset][1],
+    #                   'multilabel':multilabel_dataset[args.dataset],
+    #                   'noise':False}
+    #     #dataset_train = AudiosetDataset(args.data_train, label_csv=args.label_csv, audio_conf=audio_conf, roll_mag_aug=args.roll_mag_aug,
+    #                                     load_video=args.load_video)
     #print(dataset_train)
+
+    spec_size=(64,64)
+    in_chans = 128 
+    
+    dataset_train = EEGDataset(args.data_path, nfft = args.nfft, hop_length=args.hop_length, spec_size=spec_size)
 
     if True:  # args.distributed:
         num_tasks = misc.get_world_size()
@@ -216,16 +229,12 @@ def main(args):
     # define the model
     if args.audio_exp:
         model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, 	
-                                            in_chans=1, audio_exp=True,	
-                                            img_size=(target_length[args.dataset],128),	
+                                            in_chans=in_chans, audio_exp=True,	
+                                            img_size=spec_size,	
                                             alpha=args.alpha, mode=args.mode, use_custom_patch=args.use_custom_patch,	
                                             split_pos=args.split_pos, pos_trainable=args.pos_trainable, use_nce=args.use_nce,
                                             decoder_mode=args.decoder_mode, 
-                                            mask_2d=args.mask_2d, mask_t_prob=args.mask_t_prob, mask_f_prob=args.mask_f_prob, 
-                                            no_shift=args.no_shift,
-                                            # remove for A-MAE
-                                            #v_weight=args.v_weight, n_frm=args.n_frm, video_only=args.video_only, cl=args.cl, depth_av=args.depth_av,
-                                            )
+                                            mask_2d=args.mask_2d, mask_t_prob=args.mask_t_prob, mask_f_prob=args.mask_f_prob)
     else:
         model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss)
 
