@@ -1,18 +1,12 @@
-# Audio-MAE
+# EEG-MAE
 
 
-This repo hosts the code and models of "[Masked Autoencoders that Listen](http://arxiv.org/abs/2207.06405)" [NeurIPS 2022 [bib](https://github.com/facebookresearch/AudioMAE#citation)].
 
 
 <p align="center">
   <img align="middle" width="800" src="assets/model.png"/>
 </p>
 
-
-### Demo Examples
-<p align="center">
-  <img align="middle" width="800" src="assets/mae.png"/>
-</p>
 
 [Music](https://www.dropbox.com/s/96v5et19521hlau/Fig6_b.mp4?dl=0), [Speech](https://www.dropbox.com/s/tyzjc9sk6wch1zk/Fig6_a.mp4?dl=0), [Event Sound](https://www.dropbox.com/s/rgmqgulnl1l9mu2/Fig6_c.mp4?dl=0)
 
