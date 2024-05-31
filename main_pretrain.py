@@ -35,7 +35,7 @@ import models_mae
 
 from engine_pretrain import train_one_epoch
 from dataset import AudiosetDataset
-from dataset import EEGDataset
+from dataset import EEGSleepDataset
 
 
 def get_args_parser():
@@ -198,9 +198,9 @@ def main(args):
     #print(dataset_train)
 
     spec_size=(64,64)
-    in_chans = 128 
+    in_chans = 6 
     
-    dataset_train = EEGDataset(args.data_path, nfft = args.nfft, hop_length=args.hop_length, spec_size=spec_size)
+    dataset_train = EEGSleepDataset(args.data_path, nfft = args.nfft, hop_length=args.hop_length, spec_size=spec_size)
 
     if True:  # args.distributed:
         num_tasks = misc.get_world_size()

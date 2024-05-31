@@ -9,15 +9,14 @@ import timm.optim.optim_factory as optim_factory
 import datetime
 import matplotlib.pyplot as plt
 import wandb
-import copy
 
 from config import Config_MBM_EEG
-from dataset import EEGDataset
+from dataset import EEGSleepDataset
 import models_mae
 from engine_pretrain import train_one_epoch
 from util.utils import save_model
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
-
+import util.misc as misc
 
 os.environ["WANDB_START_METHOD"] = "thread"
 os.environ['WANDB_DIR'] = "."
@@ -25,7 +24,7 @@ os.environ['WANDB_DIR'] = "."
 class wandb_logger:
     def __init__(self, config):
         wandb.init(
-                    project="dreamdiffusion",
+                    project="EEGMAE",
                     anonymous="allow",
                     group='stageA_sc-mbm',
                     config=config,
@@ -96,7 +95,7 @@ def get_args_parser():
 
 
     # For eegset 
-    parser.add_argument("--data_path", type=str, default='./dataset/mne_data/', help="training data directory")
+    parser.add_argument("--data_path", type=str, help="training data directory")
     parser.add_argument("--nfft", type=int, help="n for stft")
     parser.add_argument("--hop_length", type=int, help="hop_length for stft")
     parser.add_argument('--use_custom_patch', type=bool, default=False, help='use custom patch and override timm PatchEmbed')
@@ -124,9 +123,9 @@ def main(config):
     # logger = wandb_logger(config) if config.local_rank == 0 else None
     logger = None
     
-    if config.local_rank == 0:
-        os.makedirs(output_path, exist_ok=True)
-        create_readme(config, output_path)
+    # if config.local_rank == 0:
+    #     os.makedirs(output_path, exist_ok=True)
+    #     create_readme(config, output_path)
     
     device = torch.device(f'cuda:{config.local_rank}') if torch.cuda.is_available() else torch.device('cpu')
     torch.manual_seed(config.seed)
@@ -134,11 +133,11 @@ def main(config):
 
     # create dataset and dataloader
     spec_size=(64,64)
-    in_chans = 128 
+    in_chans = 6 
     print(config.data_path)
-    dataset_train = EEGDataset(config.data_path, nfft = config.nfft, hop_length=config.hop_length, spec_size=spec_size)
+    dataset_train = EEGSleepDataset(path = config.data_path, nfft = config.nfft, hop_length=config.hop_length, spec_size=spec_size)
    
-    print(f'Dataset size: {len(dataset_train)}\n Time len: {dataset_train.data_len}')
+    print(f'Dataset size: {len(dataset_train)}\n')
     sampler = torch.utils.data.DistributedSampler(dataset_train, rank=config.local_rank) if torch.cuda.device_count() > 1 else None 
 
     data_loader_train = DataLoader(dataset_train, batch_size=config.batch_size, sampler=sampler, num_workers=10,
@@ -147,7 +146,7 @@ def main(config):
     # create model
     model = models_mae.__dict__[config.model](norm_pix_loss=config.norm_pix_loss, 	
                                             in_chans=in_chans, audio_exp=True,	
-                                            img_size=spec_size,	
+                                            img_size=spec_size,
                                             #use_custom_patch=config.use_custom_patch,	
                                             decoder_mode=config.decoder_mode, 
                                             mask_2d=config.mask_2d, mask_t_prob=config.mask_t_prob, mask_f_prob=config.mask_f_prob)
@@ -170,13 +169,16 @@ def main(config):
 
 
     if torch.cuda.device_count() > 1:
-        model_without_ddp = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model_without_ddp)
-        model_without_ddp = DistributedDataParallel(model_without_ddp, device_ids=[config.local_rank], output_device=config.local_rank, find_unused_parameters=config.use_nature_img_loss)
+        #model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model_without_ddp)
+        model = DistributedDataParallel(model, device_ids=[config.local_rank], output_device=config.local_rank, find_unused_parameters=config.use_nature_img_loss)
+        model_without_ddp = model.module
 
     param_groups = optim_factory.add_weight_decay(model_without_ddp, config.weight_decay)
     optimizer = torch.optim.AdamW(param_groups, lr=config.lr, betas=(0.9, 0.95))
     print(optimizer)
     loss_scaler = NativeScaler()
+
+    misc.load_model(args=config, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
 
     if logger is not None:
         logger.watch_model(model,log='all', log_freq=1000)
@@ -197,8 +199,11 @@ def main(config):
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                         'epoch': epoch,}
         
-        if (epoch % 20 == 0 or epoch + 1 == config.epochs) and config.local_rank == 0: #and ep != 0
-            save_model(config, epoch, model_without_ddp, optimizer, loss_scaler, os.path.join(output_path,'checkpoints'))
+        if (epoch % 5  == 0 or epoch + 1 == config.epochs) and config.local_rank == 0: #and ep != 0
+            misc.save_model(
+                args=config, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                loss_scaler=loss_scaler, epoch=epoch)
+            print("Save model in epoch[{}]".format(epoch))
             # plot figures
             #plot_recon_figures(model, device, dataset_pretrain, output_path, 5, config, logger, model_without_ddp)
             

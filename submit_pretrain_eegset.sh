@@ -7,12 +7,11 @@ else
 fi
 
 
-data_path="dataset/mne_data"
+data_path="dataset/physionet/30s_splited"
 
 python submitit_pretrain.py \
---use_volta32 \
---nodes 1 \
---batch_size 64 \
+--nodes 4 \
+--batch_size 128 \
 --norm_pix_loss True \
 --model maeeg_vit_base_patch16 \
 --mask_ratio 0.8 \
@@ -22,9 +21,7 @@ python submitit_pretrain.py \
 --blr $blr --weight_decay 0.0001 \
 --data_path $data_path \
 --nfft 128 \
---hop_length 16 \
+--hop_length 64 \
 --roll_mag_aug True \
 --decoder_mode 1 \
-
-
 

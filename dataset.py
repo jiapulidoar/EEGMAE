@@ -22,7 +22,7 @@ import math
 from typing import Callable, Optional, Tuple, Union
 from scipy.interpolate import interp1d
 from pathlib import Path
-
+import random
 
 class DistributedSamplerWrapper(DistributedSampler):
     def __init__(
@@ -369,11 +369,54 @@ class EEGDataset(Dataset):
         # torch.tensor()
         ret = torch.from_numpy(ret).float()
         spec = self._spectogram(ret)
+        
         return spec, ret, len(ret)
     
     def _spectogram(self, signal):
         spec = torch.stft(signal, self.nfft, hop_length=self.hop_length, return_complex=True)
         spec = torch.abs(spec)**2
         spec_db = T.AmplitudeToDB(stype="power", top_db=80)(spec)
+        spec_db = self.resize(spec_db)
+        return spec_db
+
+
+class EEGSleepDataset(Dataset):
+    def __init__(self, path='../datasets/physionet/30s/', nfft = 128, hop_length=64, spec_size=(64,64)):
+        super(EEGSleepDataset, self).__init__()
+
+        self.input_paths = [str(f) for f in sorted(Path(path).rglob('*')) if is_npy_ext(f) and os.path.isfile(f)]
+
+        assert len(self.input_paths) != 0, 'No data found'
+        n = 65536  # for 65536 random indices
+        self.input_paths = random.sample(self.input_paths, n)
+        
+        self.channel_names = ['F3-M2','F4-M1','C3-M2','C4-M1','O1-M2','O2-M1']
+        self.windowSize = 30
+        self.fs = 200
+        self.downSampling = 1
+        self.numOfChannels = 6
+        self.win_size_fs = int(round(self.windowSize*(self.fs/float(self.downSampling))))
+
+        self.nfft = nfft
+        self.hop_length = hop_length
+        self.spec_size = spec_size
+        self.resize = Resize(spec_size, antialias=None)
+
+    def __len__(self):
+        return len(self.input_paths)
+    
+    def __getitem__(self, index):
+        data_path = self.input_paths[index]
+        data = np.load(data_path, allow_pickle=True)
+
+        signal = torch.from_numpy(data).float()
+
+        return signal, "", ""
+    
+    def _spectogram(self, signal):
+        signal = torch.from_numpy(signal).float()
+        spec = torch.stft(signal, self.nfft, hop_length=self.hop_length, return_complex=True)
+        spec = torch.abs(spec)**2
+        spec_db = T.AmplitudeToDB(stype="power", top_db=120)(spec)
         spec_db = self.resize(spec_db)
         return spec_db

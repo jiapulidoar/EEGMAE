@@ -263,7 +263,7 @@ class MaskedAutoencoderViT(nn.Module):
             F=12
         else:            
             T=64
-            F=8
+            F=4
         #x = x.reshape(N, T, F, D)
         len_keep_t = int(T * (1 - mask_t_prob))
         len_keep_f = int(F * (1 - mask_f_prob))
@@ -457,10 +457,18 @@ def mae_vit_huge_patch14_dec512d8b(**kwargs):
 
 def maeeg_vit_base_patch4_dec512d8b(**kwargs):
     model = MaskedAutoencoderViT(
-        patch_size=4, embed_dim=768, depth=6, num_heads=16,
-        decoder_embed_dim=512, decoder_num_heads=16,
+        patch_size=4, embed_dim=32, depth=6, num_heads=8,
+        decoder_embed_dim=128, decoder_num_heads=8,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
+
+# def maeeg_vit_base_patch4_dec512d8b(**kwargs):
+#     model = MaskedAutoencoderViT(
+#         patch_size=4, embed_dim=768, depth=6, num_heads=16,
+#         decoder_embed_dim=512, decoder_num_heads=16,
+#         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+#     return model
+
 
 # set recommended archs
 mae_vit_base_patch16 = mae_vit_base_patch16_dec512d8b  # decoder: 512 dim, 8 blocks
